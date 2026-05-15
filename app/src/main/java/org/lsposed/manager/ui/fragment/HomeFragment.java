@@ -75,7 +75,7 @@ public class HomeFragment extends BaseFragment implements MenuProvider {
             return true;
         });
         menu.findItem(R.id.menu_issue).setOnMenuItemClickListener(v -> {
-            NavUtil.startURL(requireActivity(), "https://github.com/re-zero001/LSPosed-Irena/issues/new/choose");
+            NavUtil.startURL(requireActivity(), "https://github.com/byemaxx/LSPosed-SR/issues/");
             return true;
         });
     }
@@ -146,7 +146,7 @@ public class HomeFragment extends BaseFragment implements MenuProvider {
                 binding.statusTitle.setText(R.string.activated);
                 binding.statusIcon.setImageResource(R.drawable.ic_round_check_circle_24);
             }
-            binding.statusSummary.setText(String.format(LocaleDelegate.getDefaultLocale(), "%s (%d) - Irena",
+            binding.statusSummary.setText(String.format(LocaleDelegate.getDefaultLocale(), "%s (%d) - SR",
                     ConfigManager.getXposedVersionName(), ConfigManager.getXposedVersionCode()));
             binding.developerWarningCard.setVisibility(isDeveloper() ? View.VISIBLE : View.GONE);
         } else {
@@ -286,9 +286,8 @@ public class HomeFragment extends BaseFragment implements MenuProvider {
             binding.designAboutInfo.setMovementMethod(LinkMovementMethod.getInstance());
             binding.designAboutInfo.setTransformationMethod(new LinkTransformationMethod(requireActivity()));
             binding.designAboutInfo.setText(HtmlCompat.fromHtml(getString(
-                    R.string.about_view_source_code,
-                    "<b><a href=\"https://github.com/re-zero001/LSPosed-Irena\">GitHub</a></b>",
-                    "<b><a href=\"https://t.me/lsposed-irena\">Telegram</a></b>"), HtmlCompat.FROM_HTML_MODE_LEGACY));
+                    R.string.about_view_source_code_no_telegram,
+                    "<b><a href=\"https://github.com/byemaxx/LSPosed-SR\">GitHub</a></b>"), HtmlCompat.FROM_HTML_MODE_LEGACY));
             binding.designAboutVersion.setText(String.format(LocaleDelegate.getDefaultLocale(), "%s (%d)", BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE));
             return new BlurBehindDialogBuilder(requireContext())
                     .setView(binding.getRoot()).create();

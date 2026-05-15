@@ -1,5 +1,5 @@
 id=${moduleId}
-name=LSPosed - Irena
+name=LSPosed - SR
 version=${versionName} (${versionCode})
 versionCode=${versionCode}
 author=${authorList}

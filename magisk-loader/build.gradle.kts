@@ -32,7 +32,7 @@ plugins {
 
 val moduleName = "LSPosed"
 val moduleBaseId = "lsposed"
-val authors = "LSPosed Developers & Ireina"
+val authors = "LSPosed Developers & Ireina & byemaxx"
 
 val injectedPackageName: String by rootProject.extra
 val injectedPackageUid: Int by rootProject.extra
@@ -128,7 +128,7 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     val magiskDir = layout.buildDirectory.dir("magisk/$variantLowered")
 
     val moduleId = "${flavorLowered}_$moduleBaseId"
-    val zipFileName = "$moduleName-v$verName-$verCode-Irena-$buildTypeLowered.zip"
+    val zipFileName = "$moduleName-v$verName-$verCode-SR-$buildTypeLowered.zip"
 
     val prepareMagiskFilesTask = tasks.register<Sync>(
         "prepareMagiskFiles$variantCapped"
