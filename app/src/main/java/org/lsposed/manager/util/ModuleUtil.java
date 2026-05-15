@@ -345,8 +345,7 @@ public final class ModuleUtil {
                             : parsedMinVersion;
                     boolean isModernApiModule = hasModernEntry && displayApiVersion >= MODERN_API_VERSION;
                     boolean isApi100OnlyModule = hasModernEntry &&
-                            displayApiVersion == MIN_OUTDATED_MODERN_MODULE_API &&
-                            !hasLegacyEvidence;
+                            displayApiVersion == MIN_OUTDATED_MODERN_MODULE_API;
                     if (isModernApiModule || isApi100OnlyModule) {
                         legacy = false;
                         minVersion = parsedMinVersion;
