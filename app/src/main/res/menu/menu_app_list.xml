@@ -33,6 +33,10 @@
         android:title="@string/use_recommended" />
 
     <item
+        android:id="@+id/uncheck_all"
+        android:title="@string/uncheck_all" />
+
+    <item
         android:showAsAction="never"
         android:title="@string/menu_hide">
         <menu>

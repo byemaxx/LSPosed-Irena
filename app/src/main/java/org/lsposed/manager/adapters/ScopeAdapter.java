@@ -240,6 +240,20 @@ public class ScopeAdapter extends EmptyStateRecyclerView.EmptyStateAdapter<Scope
         });
     }
 
+    private void uncheckAll() {
+        if (!enabled) {
+            fragment.showHint(R.string.module_is_not_activated_yet, false);
+            return;
+        }
+        fragment.runAsync(() -> {
+            var tmpChkList = new HashSet<>(checkedList);
+            tmpChkList.removeIf(i -> i.userId == module.userId);
+            ConfigManager.setModuleScope(module.packageName, module.legacy, tmpChkList);
+            checkedList = tmpChkList;
+            fragment.runOnUiThread(this::notifyDataSetChanged);
+        });
+    }
+
     @SuppressLint("NotifyDataSetChanged")
     private void setLoaded(List<AppInfo> list, boolean loaded) {
         fragment.runOnUiThread(() -> {
@@ -260,6 +274,15 @@ public class ScopeAdapter extends EmptyStateRecyclerView.EmptyStateAdapter<Scope
                         .show();
             } else {
                 checkRecommended();
+            }
+            return true;
+        } else if (itemId == R.id.uncheck_all) {
+            if (!checkedList.isEmpty()) {
+                new BlurBehindDialogBuilder(activity, R.style.ThemeOverlay_MaterialAlertDialog_Centered_FullWidthButtons)
+                        .setMessage(R.string.uncheck_all_message)
+                        .setPositiveButton(android.R.string.ok, (dialog, which) -> uncheckAll())
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
             }
             return true;
         } else if (itemId == R.id.item_filter_system) {
@@ -512,7 +535,6 @@ public class ScopeAdapter extends EmptyStateRecyclerView.EmptyStateAdapter<Scope
             final var tmpList = new ArrayList<AppInfo>();
             final HashSet<ApplicationWithEquals> installedList = new HashSet<>();
             List<String> scopeList = module.getScopeList();
-            boolean emptyCheckedList = tmpChkList.isEmpty();
             appList.parallelStream().forEach(info -> {
                 int userId = info.applicationInfo.uid / App.PER_USER_RANGE;
                 String packageName = info.packageName;
@@ -535,11 +557,6 @@ public class ScopeAdapter extends EmptyStateRecyclerView.EmptyStateAdapter<Scope
                 if (scopeList != null && scopeList.contains(packageName)) {
                     synchronized (tmpRecList) {
                         tmpRecList.add(application);
-                    }
-                    if (emptyCheckedList) {
-                        synchronized (tmpChkList) {
-                            tmpChkList.add(application);
-                        }
                     }
                 } else if (shouldHideApp(info, application, tmpChkList)) {
                     return;
