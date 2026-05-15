@@ -41,9 +41,15 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
         return requested > 0;
     }
 
-    public void putBinderForSystemServer() {
+    public synchronized void putBinderForSystemServer() {
         android.os.ServiceManager.addService(PROXY_SERVICE_NAME, this);
         binderDied();
+    }
+
+    public synchronized void prepareForSystemServerRestart() {
+        binderDied();
+        requested = 0;
+        android.os.ServiceManager.addService(PROXY_SERVICE_NAME, this);
     }
 
     public LSPSystemServerService(int maxRetry) {
@@ -89,10 +95,6 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
     @Override
     public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
         Log.d(TAG, "LSPSystemServerService.onTransact: code=" + code);
-        if (originService != null) {
-            return originService.transact(code, data, reply, flags);
-        }
-
         switch (code) {
             case BridgeService.TRANSACTION_CODE -> {
                 int uid = data.readInt();
@@ -115,12 +117,15 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
                 return ServiceManager.getApplicationService().onTransact(code, data, reply, flags);
             }
             default -> {
+                if (originService != null) {
+                    return originService.transact(code, data, reply, flags);
+                }
                 return super.onTransact(code, data, reply, flags);
             }
         }
     }
 
-    public void linkToDeath() {
+    public synchronized void linkToDeath() {
         try {
             originService.linkToDeath(this, 0);
         } catch (Throwable e) {
@@ -129,7 +134,7 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
     }
 
     @Override
-    public void binderDied() {
+    public synchronized void binderDied() {
         if (originService != null) {
             originService.unlinkToDeath(this, 0);
             originService = null;
