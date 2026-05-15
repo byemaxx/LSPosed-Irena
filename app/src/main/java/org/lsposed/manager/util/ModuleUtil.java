@@ -58,6 +58,7 @@ public final class ModuleUtil {
     // xposedminversion below this
     public static int MIN_MODULE_VERSION = 2; // reject modules with
     public static final int MIN_OUTDATED_MODERN_MODULE_API = 100;
+    private static final int MODERN_API_VERSION = 101;
     private static ModuleUtil instance = null;
     private final PackageManager pm;
     private final Set<ModuleListener> listeners = ConcurrentHashMap.newKeySet();
@@ -101,28 +102,12 @@ public final class ModuleUtil {
         return result;
     }
 
-    private static int getTargetApiVersion(ZipFile zip) throws IOException {
-        var propEntry = zip.getEntry("META-INF/xposed/module.prop");
-        if (propEntry == null) {
-            return 0;
-        }
-        var prop = new Properties();
-        try (var in = zip.getInputStream(propEntry)) {
-            prop.load(in);
-        }
-        return extractIntPart(prop.getProperty("targetApiVersion"));
+    public static int extractIntPart(String str, int fallback) {
+        return TextUtils.isEmpty(str) ? fallback : extractIntPart(str);
     }
 
-    private static boolean isOutdatedModernModule(ZipFile zip) throws IOException {
-        int apiVersion = ConfigManager.getXposedApiVersion();
-        int targetApiVersion = getTargetApiVersion(zip);
-        return zip.getEntry("META-INF/xposed/java_init.list") != null
-                && apiVersion > 0
-                && targetApiVersion >= MIN_OUTDATED_MODERN_MODULE_API
-                && targetApiVersion < apiVersion;
-    }
-
-    public static ZipFile getModernModuleApk(ApplicationInfo info) {
+    @Nullable
+    public static ZipFile getModuleApk(ApplicationInfo info) {
         String[] apks;
         if (info.splitSourceDirs != null) {
             apks = Arrays.copyOf(info.splitSourceDirs, info.splitSourceDirs.length + 1);
@@ -132,10 +117,7 @@ public final class ModuleUtil {
         for (var apk : apks) {
             try {
                 zip = new ZipFile(apk);
-                int apiVersion = ConfigManager.getXposedApiVersion();
-                if (zip.getEntry("META-INF/xposed/java_init.list") != null
-                        && apiVersion > 0
-                        && getTargetApiVersion(zip) >= apiVersion) {
+                if (hasAnyModuleInitEntry(zip)) {
                     return zip;
                 }
                 zip.close();
@@ -146,29 +128,34 @@ public final class ModuleUtil {
         return zip;
     }
 
-    public static ZipFile getOutdatedModernModuleApk(ApplicationInfo info) {
-        String[] apks;
-        if (info.splitSourceDirs != null) {
-            apks = Arrays.copyOf(info.splitSourceDirs, info.splitSourceDirs.length + 1);
-            apks[info.splitSourceDirs.length] = info.sourceDir;
-        } else apks = new String[]{info.sourceDir};
-        ZipFile zip = null;
-        for (var apk : apks) {
-            try {
-                zip = new ZipFile(apk);
-                if (isOutdatedModernModule(zip)) {
-                    return zip;
-                }
-                zip.close();
-                zip = null;
-            } catch (IOException ignored) {
-            }
-        }
-        return zip;
+    private static boolean hasAnyModuleInitEntry(ZipFile zip) {
+        return hasModernInitEntry(zip) || hasLegacyInitEntry(zip);
+    }
+
+    private static boolean hasModernInitEntry(ZipFile zip) {
+        return zip.getEntry("META-INF/xposed/java_init.list") != null ||
+                zip.getEntry("META-INF/xposed/native_init.list") != null;
+    }
+
+    private static boolean hasLegacyInitEntry(ZipFile zip) {
+        return zip.getEntry("assets/xposed_init") != null ||
+                zip.getEntry("assets/native_init") != null;
     }
 
     public static boolean isLegacyModule(ApplicationInfo info) {
         return info.metaData != null && info.metaData.containsKey("xposedminversion");
+    }
+
+    private static int readLegacyMinVersion(ApplicationInfo info) {
+        if (info.metaData == null) return 0;
+        Object minVersionRaw = info.metaData.get("xposedminversion");
+        if (minVersionRaw instanceof Integer) {
+            return (Integer) minVersionRaw;
+        } else if (minVersionRaw instanceof String) {
+            return extractIntPart((String) minVersionRaw);
+        } else {
+            return 0;
+        }
     }
 
     synchronized public void reloadInstalledModules() {
@@ -183,12 +170,10 @@ public final class ModuleUtil {
         for (PackageInfo pkg : ConfigManager.getInstalledPackagesFromAllUsers(PackageManager.GET_META_DATA | MATCH_ALL_FLAGS, false)) {
             ApplicationInfo app = pkg.applicationInfo;
 
-            var modernApk = getModernModuleApk(app);
-            var legacy = isLegacyModule(app);
-            var outdatedModernApk = modernApk == null && !legacy ? getOutdatedModernModuleApk(app) : null;
-            if (modernApk != null || legacy || outdatedModernApk != null) {
+            var moduleApk = getModuleApk(app);
+            if (moduleApk != null || isLegacyModule(app)) {
                 modules.computeIfAbsent(Pair.create(pkg.packageName, app.uid / App.PER_USER_RANGE),
-                        k -> new InstalledModule(pkg, modernApk != null ? modernApk : outdatedModernApk));
+                        k -> new InstalledModule(pkg, moduleApk));
             }
         }
 
@@ -228,11 +213,9 @@ public final class ModuleUtil {
         }
 
         ApplicationInfo app = pkg.applicationInfo;
-        var modernApk = getModernModuleApk(app);
-        var legacy = isLegacyModule(app);
-        var outdatedModernApk = modernApk == null && !legacy ? getOutdatedModernModuleApk(app) : null;
-        if (modernApk != null || legacy || outdatedModernApk != null) {
-            InstalledModule module = new InstalledModule(pkg, modernApk != null ? modernApk : outdatedModernApk);
+        var moduleApk = getModuleApk(app);
+        if (moduleApk != null || isLegacyModule(app)) {
+            InstalledModule module = new InstalledModule(pkg, moduleApk);
             installedModules.put(Pair.create(packageName, userId), module);
             listeners.forEach(i -> i.onSingleModuleReloaded(module));
             return module;
@@ -318,7 +301,7 @@ public final class ModuleUtil {
         private String description; // loaded lazily
         private List<String> scopeList; // loaded lazily
 
-        private InstalledModule(PackageInfo pkg, ZipFile modernModuleApk) {
+        private InstalledModule(PackageInfo pkg, ZipFile moduleApk) {
             app = pkg.applicationInfo;
             this.pkg = pkg;
             userId = pkg.applicationInfo.uid / App.PER_USER_RANGE;
@@ -331,47 +314,69 @@ public final class ModuleUtil {
             }
             installTime = pkg.firstInstallTime;
             updateTime = pkg.lastUpdateTime;
-            legacy = modernModuleApk == null;
 
-            if (legacy) {
-                Object minVersionRaw = app.metaData.get("xposedminversion");
-                if (minVersionRaw instanceof Integer) {
-                    minVersion = (Integer) minVersionRaw;
-                } else if (minVersionRaw instanceof String) {
-                    minVersion = extractIntPart((String) minVersionRaw);
-                } else {
-                    minVersion = 0;
-                }
-                targetVersion = minVersion; // legacy modules don't have a target version
-                staticScope = false;
-            } else {
-                int minVersion = 100;
-                int targetVersion = 100;
-                boolean staticScope = false;
-                try (modernModuleApk) {
-                    var propEntry = modernModuleApk.getEntry("META-INF/xposed/module.prop");
+            int parsedLegacyMinVersion = readLegacyMinVersion(app);
+            boolean legacy = isLegacyModule(app);
+            int minVersion = legacy ? parsedLegacyMinVersion : 0;
+            int targetVersion = legacy ? parsedLegacyMinVersion : 0;
+            boolean staticScope = false;
+
+            if (moduleApk != null) {
+                try (moduleApk) {
+                    boolean hasModernEntry = hasModernInitEntry(moduleApk);
+                    boolean hasLegacyEntry = hasLegacyInitEntry(moduleApk);
+                    boolean hasLegacyEvidence = hasLegacyEntry || isLegacyModule(app);
+
+                    int parsedMinVersion = 0;
+                    int parsedTargetVersion = 0;
+                    var propEntry = moduleApk.getEntry("META-INF/xposed/module.prop");
                     if (propEntry != null) {
                         var prop = new Properties();
-                        prop.load(modernModuleApk.getInputStream(propEntry));
-                        minVersion = extractIntPart(prop.getProperty("minApiVersion"));
-                        targetVersion = extractIntPart(prop.getProperty("targetApiVersion"));
+                        try (var in = moduleApk.getInputStream(propEntry)) {
+                            prop.load(in);
+                        }
+                        parsedMinVersion = extractIntPart(prop.getProperty("minApiVersion"), 0);
+                        parsedTargetVersion = extractIntPart(prop.getProperty("targetApiVersion"), 0);
                         staticScope = TextUtils.equals(prop.getProperty("staticScope"), "true");
                     }
-                    var scopeEntry = modernModuleApk.getEntry("META-INF/xposed/scope.list");
-                    if (scopeEntry != null) {
-                        try (var reader = new BufferedReader(new InputStreamReader(modernModuleApk.getInputStream(scopeEntry)))) {
-                            scopeList = reader.lines().collect(Collectors.toList());
+
+                    int displayApiVersion = parsedTargetVersion >= MIN_OUTDATED_MODERN_MODULE_API
+                            ? parsedTargetVersion
+                            : parsedMinVersion;
+                    boolean isModernApiModule = hasModernEntry && displayApiVersion >= MODERN_API_VERSION;
+                    boolean isApi100OnlyModule = hasModernEntry &&
+                            displayApiVersion == MIN_OUTDATED_MODERN_MODULE_API &&
+                            !hasLegacyEvidence;
+                    if (isModernApiModule || isApi100OnlyModule) {
+                        legacy = false;
+                        minVersion = parsedMinVersion;
+                        targetVersion = displayApiVersion;
+
+                        var scopeEntry = moduleApk.getEntry("META-INF/xposed/scope.list");
+                        if (scopeEntry != null) {
+                            try (var reader = new BufferedReader(new InputStreamReader(moduleApk.getInputStream(scopeEntry)))) {
+                                scopeList = reader.lines().collect(Collectors.toList());
+                            }
+                        } else {
+                            scopeList = Collections.emptyList();
                         }
+                    } else if (hasLegacyEvidence) {
+                        legacy = true;
+                        minVersion = parsedLegacyMinVersion != 0 ? parsedLegacyMinVersion : parsedMinVersion;
+                        targetVersion = minVersion;
+                        staticScope = false;
                     } else {
                         scopeList = Collections.emptyList();
                     }
                 } catch (IOException | OutOfMemoryError e) {
-                    Log.e(App.TAG, "Error while closing modern module APK", e);
+                    Log.e(App.TAG, "Error while parsing module APK", e);
                 }
-                this.minVersion = minVersion;
-                this.targetVersion = targetVersion;
-                this.staticScope = staticScope;
             }
+
+            this.legacy = legacy;
+            this.minVersion = minVersion;
+            this.targetVersion = targetVersion;
+            this.staticScope = staticScope;
         }
 
         public boolean isInstalledOnExternalStorage() {
@@ -388,15 +393,17 @@ public final class ModuleUtil {
             if (this.description != null) return this.description;
             String descriptionTmp = "";
             if (legacy) {
-                Object descriptionRaw = app.metaData.get("xposeddescription");
-                if (descriptionRaw instanceof String) {
-                    descriptionTmp = ((String) descriptionRaw).trim();
-                } else if (descriptionRaw instanceof Integer) {
-                    try {
-                        int resId = (Integer) descriptionRaw;
-                        if (resId != 0)
-                            descriptionTmp = pm.getResourcesForApplication(app).getString(resId).trim();
-                    } catch (Exception ignored) {
+                if (app.metaData != null) {
+                    Object descriptionRaw = app.metaData.get("xposeddescription");
+                    if (descriptionRaw instanceof String) {
+                        descriptionTmp = ((String) descriptionRaw).trim();
+                    } else if (descriptionRaw instanceof Integer) {
+                        try {
+                            int resId = (Integer) descriptionRaw;
+                            if (resId != 0)
+                                descriptionTmp = pm.getResourcesForApplication(app).getString(resId).trim();
+                        } catch (Exception ignored) {
+                        }
                     }
                 }
             } else {
@@ -411,13 +418,15 @@ public final class ModuleUtil {
             if (scopeList != null) return scopeList;
             List<String> list = null;
             try {
-                int scopeListResourceId = app.metaData.getInt("xposedscope");
-                if (scopeListResourceId != 0) {
-                    list = Arrays.asList(pm.getResourcesForApplication(app).getStringArray(scopeListResourceId));
-                } else {
-                    String scopeListString = app.metaData.getString("xposedscope");
-                    if (scopeListString != null)
-                        list = Arrays.asList(scopeListString.split(";"));
+                if (app.metaData != null) {
+                    int scopeListResourceId = app.metaData.getInt("xposedscope");
+                    if (scopeListResourceId != 0) {
+                        list = Arrays.asList(pm.getResourcesForApplication(app).getStringArray(scopeListResourceId));
+                    } else {
+                        String scopeListString = app.metaData.getString("xposedscope");
+                        if (scopeListString != null)
+                            list = Arrays.asList(scopeListString.split(";"));
+                    }
                 }
             } catch (Exception ignored) {
             }
