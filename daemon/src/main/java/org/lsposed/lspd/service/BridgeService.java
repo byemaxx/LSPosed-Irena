@@ -16,6 +16,7 @@ import org.lsposed.daemon.BuildConfig;
 
 import java.lang.reflect.Field;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BridgeService {
 
@@ -41,11 +42,16 @@ public class BridgeService {
 
     private static Listener listener;
     private static IBinder bridgeService;
+    private static final AtomicBoolean reinjecting = new AtomicBoolean(false);
     private static final IBinder.DeathRecipient bridgeRecipient = new IBinder.DeathRecipient() {
 
         @Override
         public void binderDied() {
             Log.i(TAG, "service " + SERVICE_NAME + " is dead. ");
+            if (!reinjecting.compareAndSet(false, true)) {
+                Log.i(TAG, "system_server reinjection is already in progress");
+                return;
+            }
 
             try {
                 //noinspection JavaReflectionMemberAccess DiscouragedPrivateApi
@@ -80,7 +86,10 @@ public class BridgeService {
                 Log.w(TAG, "clear ServiceManager: " + Log.getStackTraceString(e));
             }
 
-            bridgeService.unlinkToDeath(this, 0);
+            var service = bridgeService;
+            if (service != null) {
+                service.unlinkToDeath(this, 0);
+            }
             bridgeService = null;
             listener.onSystemServerDied();
             new Handler(Looper.getMainLooper()).post(() -> sendToBridge(serviceBinder, true));
@@ -126,11 +135,11 @@ public class BridgeService {
                 return;
             }
 
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
             boolean res = false;
             // try at most three times
             for (int i = 0; i < 3; i++) {
+                Parcel data = Parcel.obtain();
+                Parcel reply = Parcel.obtain();
                 try {
                     data.writeInterfaceToken(DESCRIPTOR);
                     data.writeInt(ACTION.ACTION_SEND_BINDER.ordinal());
@@ -163,6 +172,7 @@ public class BridgeService {
                 listener.onResponseFromBridgeService(res);
             }
         } finally {
+            if (isRestart) reinjecting.set(false);
             try {
                 if (!BuildConfig.DEBUG) {
                     Os.seteuid(1000);
