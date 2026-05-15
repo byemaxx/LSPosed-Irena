@@ -91,8 +91,19 @@ public class BridgeService {
                 service.unlinkToDeath(this, 0);
             }
             bridgeService = null;
-            listener.onSystemServerDied();
-            new Handler(Looper.getMainLooper()).post(() -> sendToBridge(serviceBinder, true));
+            boolean posted = false;
+            try {
+                if (listener != null) {
+                    listener.onSystemServerDied();
+                }
+                posted = new Handler(Looper.getMainLooper()).post(() -> sendToBridge(serviceBinder, true));
+            } catch (Throwable e) {
+                Log.e(TAG, "schedule system_server reinjection", e);
+            } finally {
+                if (!posted) {
+                    reinjecting.set(false);
+                }
+            }
         }
     };
 

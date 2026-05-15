@@ -197,14 +197,25 @@ public class Dex2OatService implements Runnable {
         doMountNative(false, paths[0], paths[1], paths[2], paths[3]);
     }
 
+    // clearMounts=true calls doMountNative(false), which may update
+    // dalvik.vm.dex2oat-flags. Keep it out of normal startup and soft restart recovery.
     private boolean resetDex2OatStateLocked(boolean clearMounts) {
         if (clearMounts) clearDex2OatMountsLocked();
         closeDex2OatStateLocked();
         reopenDex2OatStateLocked();
         if (validateOriginalDex2OatFdLocked()) return true;
-        if (!clearMounts) return resetDex2OatStateLocked(true);
         closeDex2OatStateLocked();
         return false;
+    }
+
+    private void closeServerSocketLocked() {
+        if (serverSocket != null) {
+            try {
+                serverSocket.close();
+            } catch (IOException ignored) {
+            }
+            serverSocket = null;
+        }
     }
 
     private boolean notMounted() {
@@ -316,7 +327,7 @@ public class Dex2OatService implements Runnable {
             setSockCreateContext(null);
             synchronized (stateLock) {
                 running = false;
-                serverSocket = null;
+                closeServerSocketLocked();
             }
             if (compatibility == DEX2OAT_OK) {
                 doMount(false);
@@ -324,13 +335,7 @@ public class Dex2OatService implements Runnable {
             }
         } finally {
             synchronized (stateLock) {
-                if (serverSocket != null) {
-                    try {
-                        serverSocket.close();
-                    } catch (IOException ignored) {
-                    }
-                    serverSocket = null;
-                }
+                closeServerSocketLocked();
                 running = false;
             }
         }
