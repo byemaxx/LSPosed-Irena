@@ -344,10 +344,13 @@ public final class ModuleUtil {
                             ? parsedTargetVersion
                             : parsedMinVersion;
                     boolean isModernApiModule = hasModernEntry && displayApiVersion >= MODERN_API_VERSION;
-                    boolean isApi100OnlyModule = hasModernEntry &&
+                    // API 100 modern modules are unsupported in this fork. If a legacy entry is
+                    // present, the runtime falls back to legacy loading, so show it as Legacy.
+                    boolean isUnsupportedApi100ModernOnlyModule = hasModernEntry &&
                             displayApiVersion == MIN_OUTDATED_MODERN_MODULE_API &&
-                            parsedMinVersion >= MIN_OUTDATED_MODERN_MODULE_API;
-                    if (isModernApiModule || isApi100OnlyModule) {
+                            parsedMinVersion >= MIN_OUTDATED_MODERN_MODULE_API &&
+                            !hasLegacyEvidence;
+                    if (isModernApiModule || isUnsupportedApi100ModernOnlyModule) {
                         legacy = false;
                         minVersion = parsedMinVersion;
                         targetVersion = displayApiVersion;
@@ -438,7 +441,7 @@ public final class ModuleUtil {
             }
             if (list != null) {
                 //For historical reasons, legacy modules use the opposite name.
-                //https://github.com/rovo89/XposedBridge/commit/6b49688c929a7768f3113b4c65b429c7a7032afa
+                //https://github.com/rovo89/XposedBridge/commit/6b49688c929e7768f3113b4c65b429c7a7032afa
                 list.replaceAll(s ->
                     switch (s) {
                         case "android" -> "system";
