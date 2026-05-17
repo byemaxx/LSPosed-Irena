@@ -52,6 +52,7 @@ import org.lsposed.manager.util.BackupUtils;
 import org.lsposed.manager.util.CloudflareDNS;
 import org.lsposed.manager.util.LangList;
 import org.lsposed.manager.util.NavUtil;
+import org.lsposed.manager.util.ShortcutUtil;
 import org.lsposed.manager.util.ThemeUtil;
 
 import java.time.LocalDateTime;
@@ -144,6 +145,7 @@ public class SettingsFragment extends BaseFragment {
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             final String SYSTEM = "SYSTEM";
+            final String unsupportedPinShortcut = "The current default launcher does not support pin shortcuts";
 
             addPreferencesFromResource(R.xml.prefs);
 
@@ -172,6 +174,24 @@ public class SettingsFragment extends BaseFragment {
                     notificationPreference.setChecked(setNotificationPreferenceEnabled(notificationPreference));
                 }
                 notificationPreference.setOnPreferenceChangeListener((p, v) -> ConfigManager.setEnableStatusNotification((boolean) v));
+            }
+
+            Preference shortcut = findPreference("add_shortcut");
+            if (shortcut != null) {
+                shortcut.setVisible(App.isParasitic);
+                if (!ShortcutUtil.isRequestPinShortcutSupported(requireContext())) {
+                    shortcut.setEnabled(false);
+                    shortcut.setSummary(unsupportedPinShortcut);
+                }
+                shortcut.setOnPreferenceClickListener(preference -> {
+                    if (!ShortcutUtil.requestPinLaunchShortcut(() -> {
+                        App.getPreferences().edit().putBoolean("never_show_welcome", true).apply();
+                        parentFragment.showHint("Shortcut pinned", false);
+                    })) {
+                        parentFragment.showHint(unsupportedPinShortcut, true);
+                    }
+                    return true;
+                });
             }
 
             Preference backup = findPreference("backup");
