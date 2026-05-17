@@ -101,18 +101,29 @@ Java_org_lsposed_lspd_service_Dex2OatService_doMountNative(JNIEnv *env, jobject,
     const char *r64p = r64 ? env->GetStringUTFChars(r64, nullptr) : nullptr;
     const char *d64p = d64 ? env->GetStringUTFChars(d64, nullptr) : nullptr;
 
-    apply_mounts(enabled, dex2oat32, has32, dex2oat64, has64, r32p, d32p, r64p, d64p);
-
-    if (pid_t pid = fork(); pid > 0) { // parent
-        waitpid(pid, nullptr, 0);
+    auto releaseStrings = [&]() {
         if (r32p) env->ReleaseStringUTFChars(r32, r32p);
         if (d32p) env->ReleaseStringUTFChars(d32, d32p);
         if (r64p) env->ReleaseStringUTFChars(r64, r64p);
         if (d64p) env->ReleaseStringUTFChars(d64, d64p);
-    } else { // child
+    };
+
+    apply_mounts(enabled, dex2oat32, has32, dex2oat64, has64, r32p, d32p, r64p, d64p);
+
+    pid_t pid = fork();
+    if (pid > 0) { // parent
+        waitpid(pid, nullptr, 0);
+        releaseStrings();
+    } else if (pid == 0) { // child
         int ns = open("/proc/1/ns/mnt", O_RDONLY);
-        setns(ns, CLONE_NEWNS);
-        close(ns);
+        if (ns >= 0) {
+            if (setns(ns, CLONE_NEWNS) != 0) {
+                PLOGE("setns /proc/1/ns/mnt");
+            }
+            close(ns);
+        } else {
+            PLOGE("open /proc/1/ns/mnt");
+        }
 
         apply_mounts(enabled, dex2oat32, has32, dex2oat64, has64, r32p, d32p, r64p, d64p);
 
@@ -124,7 +135,10 @@ Java_org_lsposed_lspd_service_Dex2OatService_doMountNative(JNIEnv *env, jobject,
         }
 
         PLOGE("Failed to resetprop");
-        exit(1);
+        _exit(1);
+    } else {
+        PLOGE("fork");
+        releaseStrings();
     }
 }
 
