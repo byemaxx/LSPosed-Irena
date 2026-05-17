@@ -101,6 +101,12 @@
             android:summary="@string/settings_xposed_api_call_protection_summary"
             android:title="@string/settings_xposed_api_call_protection" />
 
+        <Preference
+            android:icon="@drawable/ic_outline_app_shortcut_24"
+            android:key="add_shortcut"
+            android:summary="@string/settings_create_shortcut_summary"
+            android:title="@string/create_shortcut" />
+
         <rikka.material.preference.MaterialSwitchPreference
             android:defaultValue="false"
             android:icon="@drawable/ic_outline_speaker_notes_24"
