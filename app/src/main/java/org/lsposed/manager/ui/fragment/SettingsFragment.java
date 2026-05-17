@@ -52,8 +52,10 @@ import org.lsposed.manager.util.BackupUtils;
 import org.lsposed.manager.util.CloudflareDNS;
 import org.lsposed.manager.util.LangList;
 import org.lsposed.manager.util.NavUtil;
+import org.lsposed.manager.util.ShortcutUtil;
 import org.lsposed.manager.util.ThemeUtil;
 
+import java.lang.ref.WeakReference;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Locale;
@@ -172,6 +174,27 @@ public class SettingsFragment extends BaseFragment {
                     notificationPreference.setChecked(setNotificationPreferenceEnabled(notificationPreference));
                 }
                 notificationPreference.setOnPreferenceChangeListener((p, v) -> ConfigManager.setEnableStatusNotification((boolean) v));
+            }
+
+            Preference shortcut = findPreference("add_shortcut");
+            if (shortcut != null) {
+                shortcut.setVisible(App.isParasitic);
+                if (!ShortcutUtil.isRequestPinShortcutSupported(requireContext())) {
+                    shortcut.setEnabled(false);
+                    shortcut.setSummary(R.string.settings_add_shortcut_unsupported);
+                }
+                shortcut.setOnPreferenceClickListener(preference -> {
+                    var fragmentRef = new WeakReference<>(parentFragment);
+                    if (!ShortcutUtil.requestPinLaunchShortcut(() -> {
+                        var fragment = fragmentRef.get();
+                        if (fragment != null && fragment.isAdded()) {
+                            fragment.showHint(R.string.settings_add_shortcut_pinned, false);
+                        }
+                    })) {
+                        parentFragment.showHint(R.string.settings_add_shortcut_unsupported, true);
+                    }
+                    return true;
+                });
             }
 
             Preference backup = findPreference("backup");

@@ -198,6 +198,10 @@
     <string name="settings_translation_summary">Help us translate %s into your language</string>
     <string name="settings_enable_status_notification">Status Notification</string>
     <string name="settings_enable_status_notification_summary">Show a notification that can open parasitic manager</string>
+    <string name="settings_add_shortcut">Create shortcut</string>
+    <string name="settings_add_shortcut_summary">Create a shortcut that can open parasitic manager</string>
+    <string name="settings_add_shortcut_unsupported">The current default launcher does not support pin shortcuts</string>
+    <string name="settings_add_shortcut_pinned">Shortcut pinned</string>
     <string name="settings_update_channel">Update channel</string>
     <string name="update_channel_stable">Stable</string>
     <string name="update_channel_bate">Beta</string>
