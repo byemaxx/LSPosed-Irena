@@ -58,7 +58,9 @@ public class Dex2OatService implements Runnable {
     private final FileObserver selinuxObserver;
     private final Object stateLock = new Object();
     private LocalServerSocket serverSocket;
+    private Thread serverThread;
     private boolean running;
+    private boolean stopping;
     private int compatibility = DEX2OAT_OK;
 
     private boolean openPreload(int id, String path) {
@@ -255,29 +257,97 @@ public class Dex2OatService implements Runnable {
 
     public void start() {
         synchronized (stateLock) {
-            if (running) {
+            if (running || (serverThread != null && serverThread.isAlive())) {
                 Log.d(TAG, "Dex2oat wrapper daemon already running");
                 return;
             }
             if (!resetDex2OatStateLocked(false)) return;
             if (!ensureMountedLocked()) return;
 
+            compatibility = DEX2OAT_OK;
+            stopping = false;
             running = true;
             var thread = new Thread(this);
             thread.setName("dex2oat");
+            serverThread = thread;
             thread.start();
             selinuxObserver.startWatching();
             selinuxObserver.onEvent(0, null);
         }
     }
 
-    public void refreshMount() {
-        boolean shouldStart;
+    public void stop() {
+        stop(false);
+    }
+
+    private void stop(boolean clearMounts) {
+        Thread oldThread;
+        boolean threadStopped = true;
         synchronized (stateLock) {
-            shouldStart = !running;
-            if (running && compatibility == DEX2OAT_OK) ensureMountedLocked();
+            stopping = true;
+            running = false;
+            oldThread = serverThread;
+            closeServerSocketLocked();
         }
-        if (shouldStart) start();
+
+        if (oldThread != null && oldThread != Thread.currentThread()) {
+            try {
+                oldThread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Log.w(TAG, "Interrupted while stopping dex2oat daemon", e);
+            }
+            threadStopped = !oldThread.isAlive();
+        } else if (oldThread == Thread.currentThread()) {
+            threadStopped = false;
+        }
+
+        synchronized (stateLock) {
+            closeServerSocketLocked();
+            if (threadStopped) {
+                closeDex2OatStateLocked();
+                if (clearMounts) clearDex2OatMountsLocked();
+                if (serverThread == oldThread) serverThread = null;
+                stopping = false;
+            } else {
+                Log.w(TAG, "Dex2oat daemon stop timed out; keeping current state");
+            }
+        }
+    }
+
+    public void restart() {
+        Thread previousThread;
+        boolean clearMounts;
+        synchronized (stateLock) {
+            clearMounts = compatibility == DEX2OAT_CRASHED;
+        }
+        stop(clearMounts);
+        synchronized (stateLock) {
+            previousThread = serverThread;
+        }
+        if (previousThread != null && previousThread.isAlive()) {
+            Log.w(TAG, "Skip dex2oat daemon restart: previous thread still alive");
+            return;
+        }
+        start();
+    }
+
+    public void refreshMount() {
+        boolean shouldStart = false;
+        boolean shouldRestart = false;
+        synchronized (stateLock) {
+            if (compatibility == DEX2OAT_CRASHED) {
+                shouldRestart = true;
+            } else if (!running) {
+                shouldStart = true;
+            } else if (serverThread == null || !serverThread.isAlive()) {
+                shouldRestart = true;
+            } else if (compatibility == DEX2OAT_OK) {
+                ensureMountedLocked();
+            }
+        }
+        if (shouldRestart) restart();
+        else if (shouldStart) start();
     }
 
     @Override
@@ -307,11 +377,15 @@ public class Dex2OatService implements Runnable {
             setSockCreateContext(null);
             while (running) {
                 try (var client = server.accept();
-                     var is = client.getInputStream();
+                    var is = client.getInputStream();
                      var os = client.getOutputStream()) {
                     var id = is.read();
-                    if (id >= 0 && id < fdArray.length && fdArray[id] != null) {
-                        var fd = new FileDescriptor[]{fdArray[id]};
+                    FileDescriptor fdToSend = null;
+                    synchronized (stateLock) {
+                        if (id >= 0 && id < fdArray.length) fdToSend = fdArray[id];
+                    }
+                    if (fdToSend != null) {
+                        var fd = new FileDescriptor[]{fdToSend};
                         client.setFileDescriptorsForSend(fd);
                         os.write(1);
                         Log.d(TAG, "Sent stock fd: is64 = " + ((id & 0b10) != 0) +
@@ -323,20 +397,37 @@ public class Dex2OatService implements Runnable {
                 }
             }
         } catch (IOException e) {
-            Log.e(TAG, "Dex2oat wrapper daemon crashed", e);
+            boolean expectedStop;
+            synchronized (stateLock) {
+                expectedStop = stopping || !running;
+            }
+            if (expectedStop) {
+                Log.i(TAG, "Dex2oat wrapper daemon stopped");
+            } else {
+                Log.e(TAG, "Dex2oat wrapper daemon crashed", e);
+            }
             setSockCreateContext(null);
             synchronized (stateLock) {
-                running = false;
+                if (serverThread == Thread.currentThread()) running = false;
                 closeServerSocketLocked();
             }
-            if (compatibility == DEX2OAT_OK) {
-                doMount(false);
-                compatibility = DEX2OAT_CRASHED;
+            if (!expectedStop) {
+                synchronized (stateLock) {
+                    if (compatibility == DEX2OAT_OK) {
+                        doMount(false);
+                        compatibility = DEX2OAT_CRASHED;
+                    }
+                }
             }
         } finally {
+            var current = Thread.currentThread();
             synchronized (stateLock) {
-                closeServerSocketLocked();
-                running = false;
+                if (serverThread == current) {
+                    closeServerSocketLocked();
+                    running = false;
+                    stopping = false;
+                    serverThread = null;
+                }
             }
         }
     }
