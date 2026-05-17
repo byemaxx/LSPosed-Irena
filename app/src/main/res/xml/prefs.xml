@@ -104,8 +104,8 @@
         <Preference
             android:icon="@drawable/ic_outline_app_shortcut_24"
             android:key="add_shortcut"
-            android:summary="Create a shortcut that can open the parasitic manager"
-            android:title="Create shortcut" />
+            android:summary="@string/settings_add_shortcut_summary"
+            android:title="@string/settings_add_shortcut" />
 
         <rikka.material.preference.MaterialSwitchPreference
             android:defaultValue="false"

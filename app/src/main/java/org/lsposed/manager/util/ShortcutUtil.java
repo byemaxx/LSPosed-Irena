@@ -38,6 +38,7 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.graphics.drawable.LayerDrawable;
 import android.os.Build;
+import android.util.Log;
 
 import org.lsposed.manager.App;
 import org.lsposed.manager.R;
@@ -45,9 +46,21 @@ import org.lsposed.manager.R;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ShortcutUtil {
     private static final String SHORTCUT_ID = "org.lsposed.manager.shortcut";
+    private static final long CALLBACK_TIMEOUT_MILLIS = 5 * 60 * 1000L;
+
+    private static class ShortcutCallback {
+        private final IntentSender sender;
+        private final Runnable cleanup;
+
+        private ShortcutCallback(IntentSender sender, Runnable cleanup) {
+            this.sender = sender;
+            this.cleanup = cleanup;
+        }
+    }
 
     private static Bitmap getBitmap(Context context, int id) {
         var r = context.getResources();
@@ -100,26 +113,46 @@ public class ShortcutUtil {
         return intent;
     }
 
+    private static void unregisterReceiver(Context context, BroadcastReceiver receiver, AtomicBoolean unregistered) {
+        if (!unregistered.compareAndSet(false, true)) return;
+        try {
+            context.unregisterReceiver(receiver);
+        } catch (IllegalArgumentException e) {
+            Log.w(App.TAG, "Shortcut callback receiver was already unregistered", e);
+        }
+    }
+
     @SuppressLint("InlinedApi")
-    private static IntentSender registerReceiver(Context context, Runnable task) {
+    private static ShortcutCallback registerReceiver(Context context, Runnable task) {
         if (task == null) return null;
         var uuid = UUID.randomUUID().toString();
         var filter = new IntentFilter(uuid);
-        var permission = "android.permission.CREATE_USERS";
+        var unregistered = new AtomicBoolean(false);
+        final BroadcastReceiver[] receiverHolder = new BroadcastReceiver[1];
+        Runnable cleanup = () -> {
+            var receiver = receiverHolder[0];
+            if (receiver != null) {
+                unregisterReceiver(context, receiver, unregistered);
+            }
+        };
         var receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent intent) {
                 if (!uuid.equals(intent.getAction())) return;
-                context.unregisterReceiver(this);
+                App.getMainHandler().removeCallbacks(cleanup);
+                unregisterReceiver(context, this, unregistered);
                 task.run();
             }
         };
-        context.registerReceiver(receiver, filter, permission,
-                null/* main thread */, Context.RECEIVER_EXPORTED);
+        receiverHolder[0] = receiver;
+        context.registerReceiver(receiver, filter, null,
+                null/* main thread */, Context.RECEIVER_NOT_EXPORTED);
+        App.getMainHandler().postDelayed(cleanup, CALLBACK_TIMEOUT_MILLIS);
 
-        var intent = new Intent(uuid);
+        var intent = new Intent(uuid).setPackage(context.getPackageName());
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
-        return PendingIntent.getBroadcast(context, 0, intent, flags).getIntentSender();
+        return new ShortcutCallback(PendingIntent.getBroadcast(context, 0, intent, flags).getIntentSender(),
+                cleanup);
     }
 
     private static ShortcutInfo.Builder getShortcutBuilder(Context context) {
@@ -146,8 +179,16 @@ public class ShortcutUtil {
         var context = App.getInstance();
         var sm = context.getSystemService(ShortcutManager.class);
         if (!sm.isRequestPinShortcutSupported()) return false;
-        return sm.requestPinShortcut(getShortcutBuilder(context).build(),
-                registerReceiver(context, afterPinned));
+        var callback = registerReceiver(context, afterPinned);
+        try {
+            var requested = sm.requestPinShortcut(getShortcutBuilder(context).build(),
+                    callback == null ? null : callback.sender);
+            if (!requested && callback != null) callback.cleanup.run();
+            return requested;
+        } catch (RuntimeException e) {
+            if (callback != null) callback.cleanup.run();
+            throw e;
+        }
     }
 
     public static boolean updateShortcut() {

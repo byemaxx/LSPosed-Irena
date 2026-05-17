@@ -55,6 +55,7 @@ import org.lsposed.manager.util.NavUtil;
 import org.lsposed.manager.util.ShortcutUtil;
 import org.lsposed.manager.util.ThemeUtil;
 
+import java.lang.ref.WeakReference;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Locale;
@@ -145,7 +146,6 @@ public class SettingsFragment extends BaseFragment {
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             final String SYSTEM = "SYSTEM";
-            final String unsupportedPinShortcut = "The current default launcher does not support pin shortcuts";
 
             addPreferencesFromResource(R.xml.prefs);
 
@@ -181,14 +181,17 @@ public class SettingsFragment extends BaseFragment {
                 shortcut.setVisible(App.isParasitic);
                 if (!ShortcutUtil.isRequestPinShortcutSupported(requireContext())) {
                     shortcut.setEnabled(false);
-                    shortcut.setSummary(unsupportedPinShortcut);
+                    shortcut.setSummary(R.string.settings_add_shortcut_unsupported);
                 }
                 shortcut.setOnPreferenceClickListener(preference -> {
+                    var fragmentRef = new WeakReference<>(parentFragment);
                     if (!ShortcutUtil.requestPinLaunchShortcut(() -> {
-                        App.getPreferences().edit().putBoolean("never_show_welcome", true).apply();
-                        parentFragment.showHint("Shortcut pinned", false);
+                        var fragment = fragmentRef.get();
+                        if (fragment != null && fragment.isAdded()) {
+                            fragment.showHint(R.string.settings_add_shortcut_pinned, false);
+                        }
                     })) {
-                        parentFragment.showHint(unsupportedPinShortcut, true);
+                        parentFragment.showHint(R.string.settings_add_shortcut_unsupported, true);
                     }
                     return true;
                 });
