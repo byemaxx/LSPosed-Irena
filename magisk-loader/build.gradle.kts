@@ -306,11 +306,16 @@ val pushApk = tasks.register<Exec>("pushApk") {
 tasks.register<Exec>("openApp") {
     group = "LSPosed"
     val apiLevelOutput = ByteArrayOutputStream()
-    serviceOf<ExecOperations>().exec {
-        commandLine("adb", "shell", "getprop", "ro.build.version.sdk")
-        standardOutput = apiLevelOutput
+    var apiLevel = 29
+    try {
+        serviceOf<ExecOperations>().exec {
+            commandLine("adb", "shell", "getprop", "ro.build.version.sdk")
+            standardOutput = apiLevelOutput
+        }
+        apiLevel = apiLevelOutput.toString().trim().toInt()
+    } catch (e: Exception) {
+        println("Warning: adb not found or no device attached, defaulting to API 29")
     }
-    val apiLevel = apiLevelOutput.toString().trim().toInt()
     val secretCodeAction = if (apiLevel >= 29) {
         "android.telephony.action.SECRET_CODE"
     } else {
